@@ -15,7 +15,7 @@ Short list of commands for development and acceptance testing.
 - Node.js and npm
 
 ## 0. Prepare environment
-Create a `.env` file from the example and edit values.
+Create a `.env` file from the example and edit values if you need.
 
 Windows (PowerShell):
 ```powershell
