@@ -1,0 +1,18 @@
+{
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "knex": "^3.1.0",
+    "pg": "^8.18.0"
+  },
+  "devDependencies": {
+    "jest": "^30.2.0",
+    "knex-cli": "^1.0.1",
+    "nodemon": "^3.1.11"
+  },
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "test": "jest --runInBand"
+  }
+}
