@@ -19,7 +19,16 @@ async function createCart(userId) {
 async function findOrCreateOpenCart(userId) {
   let cart = await findOpenCartByUserId(userId);
   if (cart) return cart;
-  return createCart(userId);
+  try {
+    return await createCart(userId);
+  } catch (error) {
+    // Concurrent requests may race to create the same user's open cart.
+    if (error && error.code === "23505") {
+      cart = await findOpenCartByUserId(userId);
+      if (cart) return cart;
+    }
+    throw error;
+  }
 }
 
 async function addOrUpdateCartItem(cartId, productId, qty) {
