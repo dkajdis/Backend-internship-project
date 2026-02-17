@@ -1,5 +1,6 @@
 const orderRepo = require("../repositories/order.repo");
 const inventoryRepo = require("../repositories/inventory.repo");
+const orderEventsPublisher = require("./order-events.publisher");
 const { pool } = require("../db/pool");
 const { HttpError } = require("./errors");
 
@@ -68,6 +69,16 @@ async function checkout(userId, cartId, idemKey) {
     await client.query(`UPDATE idempotency_keys SET response = $2 WHERE key = $1`, [idemKey, responseBody]);
 
     await client.query("COMMIT");
+
+    try {
+      await orderEventsPublisher.publishCheckoutSucceeded(result.order.id);
+    } catch (publishError) {
+      console.error("Failed to publish checkout event to SQS", {
+        orderId: result.order.id,
+        error: publishError.message,
+      });
+    }
+
     return responseBody;
   } catch (e) {
     await client.query("ROLLBACK");

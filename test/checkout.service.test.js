@@ -3,12 +3,17 @@ const { resetDb, closeDb } = require("./helpers/db");
 const productService = require("../src/services/product.service");
 const inventoryService = require("../src/services/inventory.service");
 const cartService = require("../src/services/cart.service");
+jest.mock("../src/services/order-events.publisher", () => ({
+  publishCheckoutSucceeded: jest.fn().mockResolvedValue({ sent: false }),
+}));
+const orderEventsPublisher = require("../src/services/order-events.publisher");
 const checkoutService = require("../src/services/checkout.service");
 
 // DB assertions (used to ensure no duplicate orders are created)
 const { pool } = require("../src/db/pool");
 
 beforeEach(async () => {
+  jest.clearAllMocks();
   await resetDb();
 });
 
@@ -41,6 +46,8 @@ test("checkout succeeds, creates order and order_items, and decreases inventory"
   expect(Array.isArray(out.order_items)).toBe(true);
   expect(out.order_items.length).toBe(1);
   expect(out.order_items[0]).toMatchObject({ product_id: p.id, qty: 2 });
+  expect(orderEventsPublisher.publishCheckoutSucceeded).toHaveBeenCalledTimes(1);
+  expect(orderEventsPublisher.publishCheckoutSucceeded).toHaveBeenCalledWith(out.order.id);
 
   // Inventory should be decreased from 10 to 8
   const inv = await inventoryService.getInventory(p.id);
@@ -99,6 +106,7 @@ test("Idempotency-Key retry returns the same response and does not create duplic
   // Retry with the same key should return cached response (no second order, no second inventory decrement)
   const second = await checkoutService.checkout(1, cartId, key);
   expect(second.order.id).toBe(firstOrderId);
+  expect(orderEventsPublisher.publishCheckoutSucceeded).toHaveBeenCalledTimes(1);
 
   const inv = await inventoryService.getInventory(p.id);
   expect(inv.available_qty).toBe(8);

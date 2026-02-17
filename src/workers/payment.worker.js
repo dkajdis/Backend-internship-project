@@ -1,0 +1,179 @@
+require("dotenv").config();
+
+const {
+  SQSClient,
+  ReceiveMessageCommand,
+  DeleteMessageCommand,
+} = require("@aws-sdk/client-sqs");
+const { processOrderPayment } = require("../services/payment-worker.service");
+const { pool } = require("../db/pool");
+
+function toPositiveInt(value, fallback) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) return fallback;
+  return n;
+}
+
+const region = process.env.AWS_REGION || "us-east-1";
+const queueUrl = process.env.SQS_QUEUE_URL;
+const waitTimeSeconds = toPositiveInt(process.env.SQS_POLL_WAIT_SECONDS, 20);
+const maxNumberOfMessages = Math.min(
+  toPositiveInt(process.env.SQS_POLL_MAX_MESSAGES, 5),
+  10
+);
+const visibilityTimeout = toPositiveInt(process.env.SQS_VISIBILITY_TIMEOUT_SECONDS, 30);
+const idleDelayMs = toPositiveInt(process.env.SQS_POLL_IDLE_DELAY_MS, 1000);
+
+const sqsClient = new SQSClient({ region });
+let keepRunning = true;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function safeJsonParse(value) {
+  try {
+    return JSON.parse(value);
+  } catch (_) {
+    return null;
+  }
+}
+
+async function deleteMessage(receiptHandle) {
+  await sqsClient.send(
+    new DeleteMessageCommand({
+      QueueUrl: queueUrl,
+      ReceiptHandle: receiptHandle,
+    })
+  );
+}
+
+async function processOneMessage(message) {
+  const body = safeJsonParse(message.Body || "");
+  const orderId = body?.orderId;
+
+  if (!Number.isInteger(orderId) || orderId <= 0) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        worker: "payment",
+        event: "invalid_message_body",
+        body: message.Body || null,
+      })
+    );
+    // Delete the message to prevent it from blocking the queue, since it's not processable.
+    await deleteMessage(message.ReceiptHandle);
+    return;
+  }
+
+  try {
+    const result = await processOrderPayment(orderId);
+    console.log(
+      JSON.stringify({
+        level: "info",
+        worker: "payment",
+        event: "order_processed",
+        orderId,
+        result,
+      })
+    );
+    await deleteMessage(message.ReceiptHandle);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        worker: "payment",
+        event: "order_process_failed",
+        orderId,
+        error: error.message,
+      })
+    );
+    // Keep message in queue for another retry via visibility timeout.
+  }
+}
+
+async function pollOnce() {
+  const response = await sqsClient.send(
+    new ReceiveMessageCommand({
+      QueueUrl: queueUrl,
+      MaxNumberOfMessages: maxNumberOfMessages,
+      WaitTimeSeconds: waitTimeSeconds,
+      VisibilityTimeout: visibilityTimeout,
+    })
+  );
+
+  const messages = response.Messages || [];
+  if (messages.length === 0) return false;
+
+  for (const message of messages) {
+    await processOneMessage(message);
+  }
+  return true;
+}
+
+async function runWorker() {
+  if (!queueUrl) {
+    throw new Error("Missing SQS_QUEUE_URL for payment worker");
+  }
+
+  console.log(
+    JSON.stringify({
+      level: "info",
+      worker: "payment",
+      event: "worker_started",
+      queueUrl,
+      region,
+    })
+  );
+
+  while (keepRunning) {
+    try {
+      const hadMessages = await pollOnce();
+      if (!hadMessages) await sleep(idleDelayMs);
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          worker: "payment",
+          event: "poll_failed",
+          error: error.message,
+        })
+      );
+      await sleep(idleDelayMs);
+    }
+  }
+}
+
+// Shutdown: stop polling and wait for in-flight processing to finish before exiting.
+async function shutdown(signal) {
+  keepRunning = false;
+  console.log(
+    JSON.stringify({
+      level: "info",
+      worker: "payment",
+      event: "worker_stopping",
+      signal,
+    })
+  );
+  await pool.end();
+}
+
+if (require.main === module) {
+  process.on("SIGINT", () => shutdown("SIGINT").catch(() => process.exit(1)));
+  process.on("SIGTERM", () => shutdown("SIGTERM").catch(() => process.exit(1)));
+
+  runWorker().catch(async (error) => {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        worker: "payment",
+        event: "worker_crashed",
+        error: error.message,
+      })
+    );
+    await pool.end();
+    process.exit(1);
+  });
+}
+
+module.exports = { runWorker, processOneMessage };

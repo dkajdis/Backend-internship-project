@@ -94,8 +94,50 @@ async function getCartForCheckout(cartId, client = null) {
   return rows[0] || null;
 }
 
+// Get order by id with FOR UPDATE lock (used in payment processing to prevent concurrent modifications)
+async function getOrderByIdForUpdate(orderId, client = null) {
+  const db = client || pool;
+  const { rows } = await db.query(
+    `SELECT id, user_id, total_price, status, created_at, updated_at
+     FROM orders
+     WHERE id = $1
+     FOR UPDATE`,
+    [orderId]
+  );
+  return rows[0] || null;
+}
+
+// Get order items for a given order
+async function getOrderItems(orderId, client = null) {
+  const db = client || pool;
+  const { rows } = await db.query(
+    `SELECT id, order_id, product_id, qty, price
+     FROM order_items
+     WHERE order_id = $1
+     ORDER BY id ASC`,
+    [orderId]
+  );
+  return rows;
+}
+
+// Update order status (used in payment processing)
+async function updateOrderStatus(orderId, status, client = null) {
+  const db = client || pool;
+  const { rows } = await db.query(
+    `UPDATE orders
+     SET status = $2, updated_at = NOW()
+     WHERE id = $1
+     RETURNING id, user_id, total_price, status, created_at, updated_at`,
+    [orderId, status]
+  );
+  return rows[0] || null;
+}
+
 module.exports = {
   createOrderWithItems,
   markCartAsCheckedOut,
   getCartForCheckout,
+  getOrderByIdForUpdate,
+  getOrderItems,
+  updateOrderStatus,
 };
