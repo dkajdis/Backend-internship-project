@@ -124,9 +124,28 @@ async function decreaseInventoryForCheckout(items, client = null) {
   }
 }
 
+// Restore inventory for given items (used when payment fails)
+async function restoreInventoryForItems(items, client = null) {
+  const db = client || pool;
+  const restored = [];
+  for (const item of items) {
+    const { rows } = await db.query(
+      `UPDATE inventory
+       SET available_qty = available_qty + $1
+       WHERE product_id = $2
+       RETURNING product_id, available_qty`,
+      [item.qty, item.product_id]
+    );
+    if (!rows[0]) throw new Error(`Inventory not found for product ${item.product_id}`);
+    restored.push(rows[0]);
+  }
+  return restored;
+}
+
 module.exports = {
   createInventoryRow,
   getInventoryByProductId,
   restock,
   decreaseInventoryForCheckout,
+  restoreInventoryForItems,
 };

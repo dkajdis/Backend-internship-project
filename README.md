@@ -20,6 +20,16 @@ DB_PORT=5432
 DB_NAME=amazon_backend
 DB_USER=app
 DB_PASSWORD=app
+AWS_REGION=us-east-1
+SQS_QUEUE_URL=https://sqs.<region>.amazonaws.com/<account-id>/<queue-name>
+SQS_SEND_MAX_RETRIES=2
+SQS_SEND_RETRY_DELAY_MS=100
+PAYMENT_SIMULATION_MODE=random
+PAYMENT_SUCCESS_RATE=0.7
+SQS_POLL_WAIT_SECONDS=20
+SQS_POLL_MAX_MESSAGES=5
+SQS_VISIBILITY_TIMEOUT_SECONDS=30
+SQS_POLL_IDLE_DELAY_MS=1000
 ```
 
 ## 1. Install dependencies
@@ -60,7 +70,12 @@ npm run dev
 curl http://localhost:3000/health
 ```
 
-## 8. Acceptance: verify APIs in order
+## 8. Start payment worker
+```bash
+npm run worker:payment
+```
+
+## 9. Acceptance: verify APIs in order
 1) Create product (Admin)
 ```bash
 curl -X POST http://localhost:3000/admin/products \
@@ -130,12 +145,18 @@ curl -X POST http://localhost:3000/checkout \
 curl -X DELETE "http://localhost:3000/cart/items/1?userId=1"
 ```
 
-## 9. Checkout behavior notes
+## 10. Checkout + worker behavior notes
 - Missing `Idempotency-Key` returns `400`.
 - Reusing the same key returns cached response (no duplicate order).
 - Concurrent checkout for the last unit should result in one success and one insufficient-stock failure.
+- On successful checkout, backend sends `{"orderId": <id>}` to `SQS_QUEUE_URL` (if configured).
+- SQS send failures are retried (`SQS_SEND_MAX_RETRIES`, `SQS_SEND_RETRY_DELAY_MS`).
+- Worker consumes SQS and simulates payment:
+- `PAYMENT_SIMULATION_MODE=random`: success rate from `PAYMENT_SUCCESS_RATE`.
+- `PAYMENT_SIMULATION_MODE=rule_based`: even `orderId` => `CONFIRMED`, odd `orderId` => `CANCELLED`.
+- On payment fail, worker restores order item quantities back to inventory.
 
-## 10. Run tests
+## 11. Run tests
 ```bash
 npm test
 ```
@@ -145,10 +166,17 @@ Run checkout tests only:
 npm run test -- test/checkout.service.test.js
 ```
 
-## 11. Current test suites
+Run worker service tests only:
+```bash
+npm run test -- test/payment-worker.service.test.js
+```
+
+## 12. Current test suites
 - `test/product.service.test.js`
 - `test/inventory.service.test.js`
 - `test/cart.service.test.js`
 - `test/checkout.service.test.js`
+- `test/order-events.publisher.test.js`
+- `test/payment-worker.service.test.js`
 
 ----------------------------------------------------------------------------------------
