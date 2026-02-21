@@ -1,3 +1,5 @@
+const { logError } = require("../utils/json-logger");
+
 function errorMiddleware(err, req, res, next) {
   // Handle malformed JSON from express.json()
   // body-parser sets `err.type === 'entity.parse.failed'` for parse errors
@@ -16,6 +18,13 @@ function errorMiddleware(err, req, res, next) {
   }
 
   const status = err.status || 500;
+  logError({
+    event: "http_error",
+    requestId: req.requestId || null,
+    orderId: res.locals?.orderId || null,
+    status,
+    error: err.message || "Internal Server Error",
+  });
   res.status(status).json({ message: err.message || "Internal Server Error" });
 }
 

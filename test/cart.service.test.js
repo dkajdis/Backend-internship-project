@@ -3,6 +3,7 @@ const { resetDb, closeDb } = require("./helpers/db");
 const productService = require("../src/services/product.service");
 const inventoryService = require("../src/services/inventory.service");
 const cartService = require("../src/services/cart.service");
+const { pool } = require("../src/db/pool");
 
 beforeEach(async () => {
   await resetDb();
@@ -84,4 +85,18 @@ test("removeItem returns 404 when cart item does not exist", async () => {
   await cartService.addItem(1, p2.id, 1);
 
   await expect(cartService.removeItem(1, p.id)).rejects.toMatchObject({ status: 404 });
+});
+
+test("concurrent addItem keeps a single open cart per user", async () => {
+  const p = await createProductAndStock({ sku: "SKU-C-008" });
+
+  const requests = Array.from({ length: 20 }, () => cartService.addItem(1, p.id, 1));
+  await Promise.all(requests);
+
+  const { rows } = await pool.query(
+    "SELECT id FROM carts WHERE user_id = $1 AND status = 'open'",
+    [1]
+  );
+
+  expect(rows).toHaveLength(1);
 });
