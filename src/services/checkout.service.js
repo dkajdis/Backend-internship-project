@@ -3,8 +3,9 @@ const inventoryRepo = require("../repositories/inventory.repo");
 const orderEventsPublisher = require("./order-events.publisher");
 const { pool } = require("../db/pool");
 const { HttpError } = require("./errors");
+const { logError } = require("../utils/json-logger");
 
-async function checkout(userId, cartId, idemKey) {
+async function checkout(userId, cartId, idemKey, options = {}) {
   if (!Number.isInteger(userId) || userId <= 0) throw new HttpError(400, "userId must be a positive integer");
   if (!Number.isInteger(cartId) || cartId <= 0) throw new HttpError(400, "cartId must be a positive integer");
   if (!idemKey) throw new HttpError(400, "Missing Idempotency-Key");
@@ -71,10 +72,18 @@ async function checkout(userId, cartId, idemKey) {
     await client.query("COMMIT");
 
     try {
-      await orderEventsPublisher.publishCheckoutSucceeded(result.order.id);
+      if (options.requestId) {
+        await orderEventsPublisher.publishCheckoutSucceeded(result.order.id, {
+          requestId: options.requestId,
+        });
+      } else {
+        await orderEventsPublisher.publishCheckoutSucceeded(result.order.id);
+      }
     } catch (publishError) {
-      console.error("Failed to publish checkout event to SQS", {
+      logError({
+        event: "checkout_event_publish_failed",
         orderId: result.order.id,
+        status: result.order.status,
         error: publishError.message,
       });
     }

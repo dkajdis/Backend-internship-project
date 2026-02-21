@@ -133,6 +133,47 @@ async function updateOrderStatus(orderId, status, client = null) {
   return rows[0] || null;
 }
 
+// Get order with items by order id (used in order history and order details)
+// GET /orders/:id
+async function getOrderWithItemsById(orderId, client = null) {
+  const db = client || pool;
+  const { rows } = await db.query(
+    `SELECT o.id, o.user_id, o.status, o.total_price, o.created_at, o.updated_at,
+            COALESCE(
+              json_agg(
+                json_build_object(
+                  'id', oi.id,
+                  'order_id', oi.order_id,
+                  'product_id', oi.product_id,
+                  'qty', oi.qty,
+                  'price', oi.price
+                )
+              ) FILTER (WHERE oi.id IS NOT NULL),
+              '[]'::json
+            ) AS items
+     FROM orders o
+     LEFT JOIN order_items oi ON o.id = oi.order_id
+     WHERE o.id = $1
+     GROUP BY o.id, o.user_id, o.status, o.total_price, o.created_at, o.updated_at`,
+    [orderId]
+  );
+  return rows[0] || null;
+}
+
+// List orders by user id, ordered by most recent first
+// GET /orders?user_id=...
+async function listOrdersByUserId(userId, client = null) {
+  const db = client || pool;
+  const { rows } = await db.query(
+    `SELECT id, user_id, status, total_price, created_at, updated_at
+     FROM orders
+     WHERE user_id = $1
+     ORDER BY id DESC`,
+    [userId]
+  );
+  return rows;
+}
+
 module.exports = {
   createOrderWithItems,
   markCartAsCheckedOut,
@@ -140,4 +181,6 @@ module.exports = {
   getOrderByIdForUpdate,
   getOrderItems,
   updateOrderStatus,
+  getOrderWithItemsById,
+  listOrdersByUserId,
 };

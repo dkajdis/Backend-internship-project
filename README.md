@@ -140,7 +140,17 @@ curl -X POST http://localhost:3000/checkout \
   -d '{"userId":1,"cartId":1}'
 ```
 
-11) Remove item from cart (for cart API check)
+11) Query order by id
+```bash
+curl http://localhost:3000/orders/1
+```
+
+12) Query orders by user
+```bash
+curl "http://localhost:3000/orders?userId=1"
+```
+
+13) Remove item from cart (for cart API check)
 ```bash
 curl -X DELETE "http://localhost:3000/cart/items/1?userId=1"
 ```
@@ -171,6 +181,11 @@ Run worker service tests only:
 npm run test -- test/payment-worker.service.test.js
 ```
 
+Run order query service tests only:
+```bash
+npm run test -- test/order.service.test.js
+```
+
 ## 12. Current test suites
 - `test/product.service.test.js`
 - `test/inventory.service.test.js`
@@ -178,5 +193,6 @@ npm run test -- test/payment-worker.service.test.js
 - `test/checkout.service.test.js`
 - `test/order-events.publisher.test.js`
 - `test/payment-worker.service.test.js`
+- `test/order.service.test.js`
 
 ----------------------------------------------------------------------------------------
