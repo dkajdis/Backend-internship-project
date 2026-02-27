@@ -9,12 +9,14 @@
   "devDependencies": {
     "jest": "^30.2.0",
     "knex-cli": "^1.0.1",
-    "nodemon": "^3.1.11"
+    "nodemon": "^3.1.11",
+    "supertest": "^7.1.4"
   },
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "worker:payment": "node src/workers/payment.worker.js",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "test:integration": "jest --runInBand test/checkout.e2e.test.js"
   }
 }

@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: amazon_backend
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d amazon_backend"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: amazon_backend
+      DB_USER: app
+      DB_PASSWORD: app_password
+      DATABASE_URL: postgresql://app:app_password@localhost:5432/amazon_backend
+      AWS_REGION: us-east-1
+      SQS_QUEUE_URL: ""
+      JWT_SECRET: ci-test-jwt-secret
+      JWT_EXPIRES_IN_SECONDS: 3600
+      DEMO_ADMIN_PASSWORD: admin123
+      DEMO_USER_PASSWORD: user123
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run migrations
+        run: npx knex migrate:latest --env development
+
+      - name: Run tests
+        run: npm test
