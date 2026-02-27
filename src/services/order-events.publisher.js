@@ -25,16 +25,25 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function publishCheckoutSucceeded(orderId) {
+async function publishCheckoutSucceeded(orderId, options = {}) {
   const queueUrl = process.env.SQS_QUEUE_URL;
   if (!queueUrl) return { sent: false, reason: "missing_queue_url" };
   const maxRetries = toNonNegativeInt(process.env.SQS_SEND_MAX_RETRIES, 2);
   const retryDelayMs = toNonNegativeInt(process.env.SQS_SEND_RETRY_DELAY_MS, 100);
 
   const payload = { orderId };
+  const messageAttributes = options.requestId
+    ? {
+        requestId: {
+          DataType: "String",
+          StringValue: String(options.requestId),
+        },
+      }
+    : undefined;
   const command = new SendMessageCommand({
     QueueUrl: queueUrl,
     MessageBody: JSON.stringify(payload),
+    MessageAttributes: messageAttributes,
   });
 
   let attempt = 0;

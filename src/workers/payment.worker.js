@@ -7,6 +7,7 @@ const {
 } = require("@aws-sdk/client-sqs");
 const { processOrderPayment } = require("../services/payment-worker.service");
 const { pool } = require("../db/pool");
+const { logInfo, logError } = require("../utils/json-logger");
 
 function toPositiveInt(value, fallback) {
   const n = Number(value);
@@ -53,41 +54,42 @@ async function processOneMessage(message) {
   const orderId = body?.orderId;
 
   if (!Number.isInteger(orderId) || orderId <= 0) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        worker: "payment",
-        event: "invalid_message_body",
-        body: message.Body || null,
-      })
-    );
+    logError({
+      worker: "payment",
+      event: "invalid_message_body",
+      requestId: message?.MessageId || null,
+      orderId: null,
+      status: "invalid_message",
+      body: message.Body || null,
+    });
     // Delete the message to prevent it from blocking the queue, since it's not processable.
     await deleteMessage(message.ReceiptHandle);
     return;
   }
 
+  const requestId =
+    message?.MessageAttributes?.requestId?.StringValue || message?.MessageId || null;
+
   try {
     const result = await processOrderPayment(orderId);
-    console.log(
-      JSON.stringify({
-        level: "info",
-        worker: "payment",
-        event: "order_processed",
-        orderId,
-        result,
-      })
-    );
+    logInfo({
+      worker: "payment",
+      event: "order_processed",
+      requestId,
+      orderId,
+      status: result.orderStatus || result.currentStatus || "unchanged",
+      result,
+    });
     await deleteMessage(message.ReceiptHandle);
   } catch (error) {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        worker: "payment",
-        event: "order_process_failed",
-        orderId,
-        error: error.message,
-      })
-    );
+    logError({
+      worker: "payment",
+      event: "order_process_failed",
+      requestId,
+      orderId,
+      status: "failed",
+      error: error.message,
+    });
     // Keep message in queue for another retry via visibility timeout.
   }
 }
@@ -99,6 +101,7 @@ async function pollOnce() {
       MaxNumberOfMessages: maxNumberOfMessages,
       WaitTimeSeconds: waitTimeSeconds,
       VisibilityTimeout: visibilityTimeout,
+      MessageAttributeNames: ["All"],
     })
   );
 
@@ -116,29 +119,29 @@ async function runWorker() {
     throw new Error("Missing SQS_QUEUE_URL for payment worker");
   }
 
-  console.log(
-    JSON.stringify({
-      level: "info",
-      worker: "payment",
-      event: "worker_started",
-      queueUrl,
-      region,
-    })
-  );
+  logInfo({
+    worker: "payment",
+    event: "worker_started",
+    requestId: null,
+    orderId: null,
+    status: "running",
+    queueUrl,
+    region,
+  });
 
   while (keepRunning) {
     try {
       const hadMessages = await pollOnce();
       if (!hadMessages) await sleep(idleDelayMs);
     } catch (error) {
-      console.error(
-        JSON.stringify({
-          level: "error",
-          worker: "payment",
-          event: "poll_failed",
-          error: error.message,
-        })
-      );
+      logError({
+        worker: "payment",
+        event: "poll_failed",
+        requestId: null,
+        orderId: null,
+        status: "failed",
+        error: error.message,
+      });
       await sleep(idleDelayMs);
     }
   }
@@ -147,14 +150,14 @@ async function runWorker() {
 // Shutdown: stop polling and wait for in-flight processing to finish before exiting.
 async function shutdown(signal) {
   keepRunning = false;
-  console.log(
-    JSON.stringify({
-      level: "info",
-      worker: "payment",
-      event: "worker_stopping",
-      signal,
-    })
-  );
+  logInfo({
+    worker: "payment",
+    event: "worker_stopping",
+    requestId: null,
+    orderId: null,
+    status: "stopping",
+    signal,
+  });
   await pool.end();
 }
 
@@ -163,14 +166,14 @@ if (require.main === module) {
   process.on("SIGTERM", () => shutdown("SIGTERM").catch(() => process.exit(1)));
 
   runWorker().catch(async (error) => {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        worker: "payment",
-        event: "worker_crashed",
-        error: error.message,
-      })
-    );
+    logError({
+      worker: "payment",
+      event: "worker_crashed",
+      requestId: null,
+      orderId: null,
+      status: "crashed",
+      error: error.message,
+    });
     await pool.end();
     process.exit(1);
   });
